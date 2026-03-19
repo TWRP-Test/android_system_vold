@@ -36,6 +36,12 @@
 
 #include <chrono>
 
+#ifdef CONFIG_HW_DISK_ENCRYPTION
+#include <linux/dm-ioctl.h>
+#include <sys/ioctl.h>
+#include <cryptfs_hw.h>
+#endif
+
 using android::base::ParseUint;
 using android::vold::CryptoType;
 using android::vold::KeyBuffer;
@@ -45,9 +51,24 @@ using namespace android::vold;
 using namespace std::chrono_literals;
 
 #define MAX_KEY_LEN 48
+#define DEFAULT_HEX_PASSWORD "64656661756c745f70617373776f7264"
 
 #define TABLE_LOAD_RETRIES 10
 
+#define KEY_LEN_BYTES 16
+
+static int previous_type;
+
+#ifdef CONFIG_HW_DISK_ENCRYPTION
+static void convert_key_to_hex_ascii(const unsigned char *master_key,
+                                     unsigned int keysize, char *master_key_ascii);
+
+
+#endif
+
+static char* saved_mount_point;
+static int master_key_saved = 0;
+static struct crypt_persist_data* persist_data = NULL;
 constexpr CryptoType aes_128_cbc = CryptoType()
                                            .set_config_name("AES-128-CBC")
                                            .set_kernel_name("aes-cbc-essiv:sha256")
@@ -93,6 +114,25 @@ static void convert_key_to_hex_ascii(const KeyBuffer& key, char* key_ascii) {
     /* Add the null termination */
     key_ascii[a] = '\0';
 }
+
+
+#if defined(CONFIG_HW_DISK_ENCRYPTION) && !defined(CONFIG_HW_DISK_ENCRYPT_PERF)
+#define DM_CRYPT_BUF_SIZE 4096
+
+static void ioctl_init(struct dm_ioctl* io, size_t dataSize, const char* name, unsigned flags) {
+    memset(io, 0, dataSize);
+    io->data_size = dataSize;
+    io->data_start = sizeof(struct dm_ioctl);
+    io->version[0] = 4;
+    io->version[1] = 0;
+    io->version[2] = 0;
+    io->flags = flags;
+    if (name) {
+        strlcpy(io->name, name, sizeof(io->name));
+    }
+}
+
+#endif
 
 /*
  * Called by vold when it's asked to mount an encrypted external

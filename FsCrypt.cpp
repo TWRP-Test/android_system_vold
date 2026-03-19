@@ -17,6 +17,7 @@
 #include "FsCrypt.h"
 
 #include "Checkpoint.h"
+#include "Keystore.h"
 #include "KeyStorage.h"
 #include "KeyUtil.h"
 #include "Utils.h"
@@ -875,6 +876,7 @@ bool fscrypt_set_ce_key_protection(userid_t user_id, const std::string& secret_h
 
     auto const directory_path = get_ce_key_directory_path(user_id);
     auto const paths = get_ce_key_paths(directory_path);
+
     std::string ce_key_path;
     if (!get_ce_key_new_path(directory_path, paths, &ce_key_path)) return false;
     if (!android::vold::storeKeyAtomically(ce_key_path, user_key_temp, *auth, ce_key)) return false;

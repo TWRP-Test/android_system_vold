@@ -22,6 +22,14 @@
 #include "KeyBuffer.h"
 #include "KeyUtil.h"
 
+#ifdef CONFIG_HW_DISK_ENCRYPTION
+/* This flag is used to transition from L->M upgrade. L release passed
+ * a byte for every nible of user password while M release is passing
+ * ascii value of user password.
+ * Random flag value is chosen so that it does not conflict with other use cases
+ */
+#define CRYPT_ASCII_PASSWORD_UPDATED 0x1000
+#endif
 int cryptfs_setup_ext_volume(const char* label, const char* real_blkdev,
                              const android::vold::KeyBuffer& key, std::string* out_crypto_blkdev);
 const android::vold::KeyGeneration cryptfs_get_keygen();

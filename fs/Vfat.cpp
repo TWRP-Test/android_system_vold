@@ -238,7 +238,7 @@ status_t Format(const std::string& source, unsigned long numSectors) {
 
     cmd.push_back(source);
 
-    int rc = ForkExecvp(cmd);
+    int rc = ForkExecvp(cmd, nullptr, sFsckUntrustedContext);
     if (rc < 0) {
         LOG(ERROR) << "Filesystem format failed due to logwrap error";
         errno = EIO;

@@ -52,6 +52,7 @@ static constexpr size_t AES_KEY_BYTES = 32;
 static constexpr size_t GCM_NONCE_BYTES = 12;
 static constexpr size_t GCM_MAC_BYTES = 16;
 static constexpr size_t SECDISCARDABLE_BYTES = 1 << 14;
+constexpr int EXT4_AES_256_XTS_KEY_SIZE = 64;
 
 static const char* kCurrentVersion = "1";
 static const char* kRmPath = "/system/bin/rm";
@@ -139,8 +140,8 @@ bool generateWrappedStorageKey(KeyBuffer* key) {
     Keystore keystore;
     if (!keystore) return false;
     std::string key_temp;
-    auto paramBuilder = km::AuthorizationSetBuilder().AesEncryptionKey(AES_KEY_BYTES * 8);
-    paramBuilder.Authorization(km::TAG_STORAGE_KEY);
+    auto paramBuilder = km::AuthorizationSetBuilder().AesEncryptionKey(AES_KEY_BYTES * 8)
+        .Authorization(km::TAG_STORAGE_KEY);
 
     km::KeyParameter param1;
     param1.tag = (km::Tag) (KM_TAG_FBE_ICE);
@@ -153,12 +154,29 @@ bool generateWrappedStorageKey(KeyBuffer* key) {
     return true;
 }
 
-bool exportWrappedStorageKey(const KeyBuffer& ksKey, KeyBuffer* key) {
+bool exportWrappedStorageKey(const KeyBuffer& kmKey, KeyBuffer* key) {
     Keystore keystore;
     if (!keystore) return false;
     std::string key_temp;
 
-    if (!keystore.exportKey(ksKey, &key_temp)) return false;
+    auto ret = keystore.exportKey(kmKey, &key_temp);
+    if (ret != km::ErrorCode::OK) {
+        if (ret == km::ErrorCode::KEY_REQUIRES_UPGRADE) {
+           // TODO(b/187304488): Re-land the below logic. (keystore.upgradeKey() was removed)
+           return false;
+           /*
+           std::string kmKeyStr(reinterpret_cast<const char*>(kmKey.data()), kmKey.size());
+           std::string Keystr;
+           if (!keystore.upgradeKey(kmKeyStr, km::AuthorizationSet(), &Keystr)) return false;
+           KeyBuffer upgradedKey = KeyBuffer(Keystr.size());
+           memcpy(reinterpret_cast<void*>(upgradedKey.data()), Keystr.c_str(), upgradedKey.size());
+           ret = keystore.exportKey(upgradedKey, &key_temp);
+           if (ret != km::ErrorCode::OK) return false;
+           */
+        } else {
+           return false;
+        }
+    }
     *key = KeyBuffer(key_temp.size());
     memcpy(reinterpret_cast<void*>(key->data()), key_temp.c_str(), key->size());
     return true;
