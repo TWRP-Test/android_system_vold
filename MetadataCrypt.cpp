@@ -130,15 +130,9 @@ static bool read_key(const std::string& metadata_key_dir, const KeyGeneration& g
     auto in_dsu = android::base::GetBoolProperty("ro.gsid.image_running", false);
     // !pathExists(dir) does not imply there's a factory reset when in DSU mode.
     if (!pathExists(dir) && !in_dsu && first_key) {
-        auto delete_all = android::base::GetBoolProperty(
-                "ro.crypto.metadata_init_delete_all_keys.enabled", false);
-        if (delete_all) {
-            LOG(INFO) << "Metadata key does not exist, calling deleteAllKeys";
-            Keystore::deleteAllKeys();
-        } else {
-            LOG(INFO) << "Metadata key does not exist but "
-                          "ro.crypto.metadata_init_delete_all_keys.enabled is false";
-        }
+        // AOSP wipes Keystore here, assuming a missing key means a factory
+        // reset. In recovery it usually means /metadata failed to mount.
+        LOG(WARNING) << "Metadata key does not exist at " << dir << ", not wiping Keystore";
     }
     auto temp = metadata_key_dir + "/tmp";
     return retrieveOrGenerateKey(dir, temp, kEmptyAuthentication, gen, key);
