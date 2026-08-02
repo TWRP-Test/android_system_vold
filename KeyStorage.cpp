@@ -335,12 +335,8 @@ static KeystoreOperation BeginKeystoreOp(Keystore& keystore, const std::string& 
 
     auto blob_file = dir + "/" + kFn_keymaster_key_blob;
     LOG(INFO) << "reading blob_file: " << blob_file;
-    std::string blob_dir(kFn_keymaster_key_blob);
-    std::string temp_dir = "/tmp/" + blob_dir + "/";
-    if (TEMP_FAILURE_RETRY(mkdir(temp_dir.c_str(), 0700)) == -1) {
-        PLOG(ERROR) << "key mkdir " << temp_dir;
-    }
-    auto upgraded_blob_file = temp_dir + kFn_keymaster_key_blob;
+    // Never persist an upgraded blob: the installed system cannot open a blob
+    // rebound to a newer OS version or patch level.
     // auto upgraded_blob_file = dir + "/" + kFn_keymaster_key_blob_upgraded;
     std::lock_guard<std::mutex> lock(key_upgrade_lock);
 
@@ -360,17 +356,15 @@ static KeystoreOperation BeginKeystoreOp(Keystore& keystore, const std::string& 
     if (!opHandle) return opHandle;
 
     // If key blob wasn't upgraded, nothing left to do.
-    // if (!opHandle.getUpgradedBlob()) return opHandle;
+    if (!opHandle.getUpgradedBlob()) return opHandle;
 
 //     if (already_upgraded) {
 //         LOG(ERROR) << "Unexpected case; already-upgraded key " << upgraded_blob_file
 //                    << " still requires upgrade";
 //         return KeystoreOperation();
 //     }
-    LOG(INFO) << "Upgrading key: " << blob_file;
-    
-    if (!writeStringToFile(*opHandle.getUpgradedBlob(), upgraded_blob_file))
-        return KeystoreOperation();
+    LOG(WARNING) << "KeyMint upgraded " << blob_file
+                 << " for this operation only; the on-disk blob is left unchanged";
 //     if (cp_needsCheckpoint()) {
 //         LOG(INFO) << "Wrote upgraded key to " << upgraded_blob_file
 //                   << "; delaying commit due to checkpoint";
