@@ -1018,9 +1018,9 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename) 
 
 extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password) {
 	printf("Attempting to decrypt user\n");
-    uint8_t *auth_token;
-    uint32_t auth_token_len;
-    int ret;
+    uint8_t *auth_token = NULL;
+    uint32_t auth_token_len = 0;
+    int ret = -1;
 
     struct stat st;
     if (user_id > 9999) {
@@ -1089,16 +1089,12 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
 								}
 							}
 						 );
-	if (!hwRet.isOk()) {
+	delete[] auth_token;
+	if (!hwRet.isOk() || ret != 0) {
+		printf("gatekeeper verification failed\n");
 		return false;
 	}
 
-	char token_hex[(auth_token_len*2)+1];
-	token_hex[(auth_token_len*2)] = 0;
-	uint32_t i;
-	for (i=0;i<auth_token_len;i++) {
-		sprintf(&token_hex[2*i], "%02X", auth_token[i]);
-	}
 	// The secret is "Android FBE credential hash" plus appended 0x00 to reach 128 bytes then append the user's password then feed that to sha512sum
 	std::string secret = HashPassword(Password);
 	if (!Decrypt_CE_storage(user_id, secret)) {
