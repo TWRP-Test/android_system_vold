@@ -24,6 +24,7 @@ class KeystoreInfo {
 public:
 std::string getHandle(const userid_t user_id);
 std::string getAlias(std::string handle);
+bool backupDatabase(const std::string& src, const std::string& dst);
 
 private:
 std::string uint2hex(int64_t num);

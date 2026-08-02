@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <keyutils.h>
 #include "cutils/properties.h"
@@ -490,16 +491,57 @@ namespace keystore {
 		}
 	}
 
-	void copySqliteDb() {
-		std::string keystore_path = "/tmp/misc/keystore/";
-		std::string dst = keystore_path + "persistent.sqlite";
-		std::string src = "/data/misc/keystore/persistent.sqlite";
-		std::ifstream srcif(src.c_str(), std::ios::binary);
-		std::ofstream dstof(dst.c_str(), std::ios::binary);
-		printf("copying '%s' to '%s'\n", src.c_str(), dst.c_str());
-		dstof << srcif.rdbuf();
-		srcif.close();
-		dstof.close();
+	static bool waitForServiceState(const char* service, const char* state) {
+		char current[PROPERTY_VALUE_MAX] = {};
+		std::string prop = std::string("init.svc.") + service;
+		for (int i = 0; i < 100; i++) {
+			property_get(prop.c_str(), current, "");
+			if (!strcmp(current, state)) return true;
+			usleep(100000);
+		}
+		printf("'%s' did not reach state '%s'\n", service, state);
+		return false;
+	}
+
+	/* keystore2 runs with its database on tmpfs so that nothing done here can
+	 * reach the real one. It still has to see the installed system's keys, so
+	 * seed it from /data before the first keystore2 call. */
+	bool syncKeystoreDb() {
+		static bool synced = false;
+		if (synced) return true;
+
+		const std::string src = "/data/misc/keystore/persistent.sqlite";
+		const std::string dst = "/tmp/misc/keystore/persistent.sqlite";
+		if (!android::vold::pathExists(src)) {
+			printf("no keystore database at '%s'\n", src.c_str());
+			return false;
+		}
+
+		// keystore2 holds the destination open, so stop it for a clean copy.
+		printf("stopping keystore2 to sync '%s'\n", src.c_str());
+		property_set("ctl.stop", "keystore2");
+		waitForServiceState("keystore2", "stopped");
+
+		unlink("/tmp/misc/keystore/persistent.sqlite-wal");
+		unlink("/tmp/misc/keystore/persistent.sqlite-shm");
+		unlink(dst.c_str());
+
+		KeystoreInfo keystore_info;
+		bool copied = keystore_info.backupDatabase(src, dst);
+		if (copied) chmod(dst.c_str(), 0600);
+
+		property_set("ctl.start", "keystore2");
+		if (!waitForServiceState("keystore2", "running")) return false;
+		for (int i = 0; i < 100; i++) {
+			if (AServiceManager_checkService(
+					"android.system.keystore2.IKeystoreService/default") != nullptr) {
+				synced = copied;
+				return copied;
+			}
+			usleep(100000);
+		}
+		printf("keystore2 did not register after restart\n");
+		return false;
 	}
 
 	/* C++ replacement for function of the same name
@@ -733,6 +775,12 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
 	// Get the handle: https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/LockSettingsService.java#2017
 	KeystoreInfo keystore_info;
 	std::string handle_str = keystore_info.getHandle(user_id);
+	// The synthetic password key is looked up by alias, so keystore2 needs the
+	// installed system's database before any of the calls below.
+	if (!android::keystore::syncKeystoreDb()) {
+		printf("Failed to sync the keystore database\n");
+		return Free_Return(retval, weaver_key, &pwd);
+	}
 	// Now we begin driving unwrapPasswordBasedSyntheticPassword from: https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#758
 	// First we read the password data which contains scrypt parameters
 	// printf("pwd N %i R %i P %i salt ", pwd.scryptN, pwd.scryptR, pwd.scryptP); output_hex((char*)pwd.salt, pwd.salt_len); printf("\n");
@@ -750,7 +798,6 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
 			return Free_Return(retval, weaver_key, &pwd);
 		}
 	} else {
-		android::keystore::copySqliteDb(); // early copy db for keystore
 		std::string defpassword = "default-password";
 		memcpy(password_token, defpassword.data(), defpassword.length());
 	}

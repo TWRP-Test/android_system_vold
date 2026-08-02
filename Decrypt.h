@@ -34,7 +34,7 @@ static constexpr int NAMESPACE_LOCKSETTINGS = 103;
 
 namespace android {
 namespace keystore {
-    void copySqliteDb();
+    bool syncKeystoreDb();
     int Get_Password_Type(const userid_t user_id, std::string& filename);
     bool Decrypt_DE();
     bool Decrypt_User(const userid_t user_id, const std::string& Password);
