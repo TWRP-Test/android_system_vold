@@ -209,17 +209,17 @@ static bool fixate_user_ce_key(const std::string& directory_path, const std::str
     return true;
 }
 
-static bool read_and_fixate_user_ce_key(userid_t user_id,
-                                        const android::vold::KeyAuthentication& auth,
-                                        KeyBuffer* ce_key) {
+// Unlike AOSP this does not fixate the key it found: dropping the sibling
+// bindings is a Keystore deletion we cannot undo if the user was midway
+// through a credential change.
+static bool read_user_ce_key(userid_t user_id, const android::vold::KeyAuthentication& auth,
+                             KeyBuffer* ce_key) {
     auto const directory_path = get_ce_key_directory_path(user_id);
     auto const paths = get_ce_key_paths(directory_path);
     for (auto const ce_key_path : paths) {
         LOG(INFO) << "Trying user CE key " << ce_key_path;
         if (retrieveKey(ce_key_path, auth, ce_key)) {
             LOG(INFO) << "Successfully retrieved key";
-            s_deferred_fixations.erase(directory_path);
-            fixate_user_ce_key(directory_path, ce_key_path, paths);
             return true;
         }
     }
@@ -842,10 +842,10 @@ bool fscrypt_set_ce_key_protection(userid_t user_id, const std::string& secret_h
         // at upgrade time, when CE keys that were previously protected by
         // kEmptyAuthentication are encrypted by the user's synthetic password.
         LOG(INFO) << "CE key already exists on-disk; re-protecting it with the given secret";
-        if (!read_and_fixate_user_ce_key(user_id, kEmptyAuthentication, &ce_key)) {
+        if (!read_user_ce_key(user_id, kEmptyAuthentication, &ce_key)) {
             // Before failing, also check whether the key is already protected
             // with the given secret.
-            if (read_and_fixate_user_ce_key(user_id, *auth, &ce_key)) {
+            if (read_user_ce_key(user_id, *auth, &ce_key)) {
                 LOG(INFO) << "CE key is already protected by given secret.  Nothing to do.";
                 LOG(INFO) << "Errors above are for the attempt with empty auth and can be ignored.";
                 return true;
@@ -926,7 +926,7 @@ bool fscrypt_unlock_ce_storage(userid_t user_id, const std::string& secret_hex) 
     auto auth = authentication_from_hex(secret_hex);
     if (!auth) return false;
     KeyBuffer ce_key;
-    if (!read_and_fixate_user_ce_key(user_id, *auth, &ce_key)) return false;
+    if (!read_user_ce_key(user_id, *auth, &ce_key)) return false;
     EncryptionPolicy ce_policy;
     if (!install_storage_key(DATA_MNT_POINT, s_data_options, ce_key, &ce_policy)) return false;
     s_ce_policies[user_id].internal = ce_policy;
