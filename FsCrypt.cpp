@@ -570,28 +570,16 @@ install:
         return false;
     }
 
-    std::string options_string;
-    if (!OptionsToString(s_device_policy.options, &options_string)) {
-        LOG(ERROR) << "Unable to serialize options";
-        return false;
-    }
-    std::string options_filename = std::string(DATA_MNT_POINT) + fscrypt_key_mode;
-    if (!android::vold::writeStringToFile(options_string, options_filename)) return false;
-
-    std::string ref_filename = std::string(DATA_MNT_POINT) + fscrypt_key_ref;
+    // AOSP writes /data/unencrypted/{mode,ref,per_boot_ref} here for init to
+    // pick up on the next boot. The installed system owns those files and
+    // rewrites them itself, so recovery only keeps the policy in memory.
     de_key_raw_ref = s_device_policy.key_raw_ref;
-    if (!android::vold::writeStringToFile(s_device_policy.key_raw_ref, ref_filename)) return false;
-    LOG(INFO) << "Wrote system DE key reference to:" << ref_filename;
 
     KeyBuffer per_boot_key;
     if (!generateStorageKey(makeGen(s_data_options), &per_boot_key)) return false;
     EncryptionPolicy per_boot_policy;
     if (!install_storage_key(DATA_MNT_POINT, s_data_options, per_boot_key, &per_boot_policy))
         return false;
-    std::string per_boot_ref_filename = std::string("/data") + fscrypt_key_per_boot_ref;
-    if (!android::vold::writeStringToFile(per_boot_policy.key_raw_ref, per_boot_ref_filename))
-        return false;
-    LOG(INFO) << "Wrote per boot key reference to:" << per_boot_ref_filename;
 
     return true;
 }
