@@ -1102,15 +1102,35 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
 	}
     bool should_reenroll;
 	bool request_reenroll = false;
-	android::sp<android::hardware::gatekeeper::V1_0::IGatekeeper> gk_device;
-	gk_device = ::android::hardware::gatekeeper::V1_0::IGatekeeper::getService();
-	if (gk_device == nullptr)
-		return false;
 	android::hardware::hidl_vec<uint8_t> curPwdHandle;
 	curPwdHandle.setToExternal(const_cast<uint8_t *>((const uint8_t *)handle.c_str()), st.st_size);
 	android::hardware::hidl_vec<uint8_t> enteredPwd;
 	enteredPwd.setToExternal(const_cast<uint8_t *>((const uint8_t *)Password.c_str()), Password.size());
 
+	// Devices that only declare the AIDL GateKeeper have no HIDL service.
+	constexpr const char gatekeeperServiceName[] = "android.hardware.gatekeeper.IGatekeeper/default";
+	if (AServiceManager_isDeclared(gatekeeperServiceName)) {
+		::ndk::SpAIBinder gkBinder(AServiceManager_waitForService(gatekeeperServiceName));
+		auto aidl_gk_device = AidlIGatekeeper::fromBinder(gkBinder);
+		if (!aidl_gk_device) {
+			printf("failed to get gatekeeper service\n");
+			return false;
+		}
+		AidlGatekeeperVerifyResp rsp;
+		auto result = aidl_gk_device->verify(user_id, 0 /* challenge */, curPwdHandle, enteredPwd, &rsp);
+		if (!result.isOk() || rsp.statusCode < AidlIGatekeeper::STATUS_OK) {
+			printf("gatekeeper verification failed\n");
+			return false;
+		}
+		printf("GateKeeper status ok\n");
+		std::string secret = HashPassword(Password);
+		return Decrypt_CE_storage(user_id, secret);
+	}
+
+	android::sp<android::hardware::gatekeeper::V1_0::IGatekeeper> gk_device;
+	gk_device = ::android::hardware::gatekeeper::V1_0::IGatekeeper::getService();
+	if (gk_device == nullptr)
+		return false;
 
 
 	android::hardware::Return<void> hwRet =
