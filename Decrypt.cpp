@@ -632,6 +632,25 @@ namespace keystore {
 				printf("Begin Operation failed\n");
 				return disk_decryption_secret_key;
 			}
+			if (encOperationResponse.upgradedBlob) {
+				/* KeyMint rebound the synthetic password key because our OS
+				 * version or patch levels do not match the installed system.
+				 * The upgrade only lives in the tmpfs Keystore database, so the
+				 * blob on /data stays usable, but keystore2 has marked the old
+				 * one superseded and its garbage collector deletes superseded
+				 * blobs from KeyMint itself. That collector is gated on
+				 * sys.boot_completed, so it stays idle here unless something
+				 * sets that property. */
+				printf("WARNING: KeyMint upgraded the synthetic password key\n");
+				printf("WARNING: the recovery environment does not match the installed system\n");
+				char boot_completed[PROPERTY_VALUE_MAX] = {};
+				property_get("sys.boot_completed", boot_completed, "");
+				if (!strcmp(boot_completed, "1")) {
+					printf("ERROR: sys.boot_completed is set, so keystore2 will garbage\n");
+					printf("ERROR: collect the original key blob. Do not set that property\n");
+					printf("ERROR: in recovery.\n");
+				}
+			}
 			std::optional<std::vector<uint8_t>> optPlaintext;
 
 			begin_rc = encOperationResponse.iOperation->finish(cipher_text_hidlvec, {}, &optPlaintext);
