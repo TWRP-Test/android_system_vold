@@ -77,6 +77,28 @@ std::string KeystoreInfo::getHandle(const userid_t user_id) {
 	return uint2hex(value);
 }
 
+// Uses the SQLite backup API rather than a plain file copy so that a database
+// with pending WAL content is reproduced correctly.
+bool KeystoreInfo::backupDatabase(const std::string& src, const std::string& dst) {
+	sqlite3 *src_db = NULL;
+	sqlite3 *dst_db = NULL;
+	bool ok = false;
+
+	if (sqlite3_open_v2(src.c_str(), &src_db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK &&
+			sqlite3_open(dst.c_str(), &dst_db) == SQLITE_OK) {
+		sqlite3_backup *backup = sqlite3_backup_init(dst_db, "main", src_db, "main");
+		if (backup) {
+			sqlite3_backup_step(backup, -1);
+			ok = sqlite3_backup_finish(backup) == SQLITE_OK;
+		}
+	}
+	if (!ok)
+		fprintf(stderr, "Failed to back up '%s' to '%s'\n", src.c_str(), dst.c_str());
+	sqlite3_close(dst_db);
+	sqlite3_close(src_db);
+	return ok;
+}
+
 std::string KeystoreInfo::getAlias(std::string handle) {
 	std::string alias(SYNTHETIC_PASSWORD_KEY_PREFIX);
 	alias = alias + handle;
