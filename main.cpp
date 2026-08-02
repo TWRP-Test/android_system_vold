@@ -57,7 +57,6 @@ static void parse_args(int argc, char** argv);
 static void VoldLogger(android::base::LogId log_buffer_id, android::base::LogSeverity severity,
                        const char* tag, const char* file, unsigned int line, const char* message);
 
-struct selabel_handle* sehandle;
 android::base::LogdLogger logd_logger(android::base::SYSTEM);
 
 using android::base::StringPrintf;
@@ -82,12 +81,7 @@ int main(int argc, char** argv) {
 
     parse_args(argc, argv);
 
-    sehandle = selinux_android_file_context_handle();
-    if (!sehandle) {
-        LOG(ERROR) << "Failed to get SELinux file contexts handle";
-        exit(1);
-    }
-    selinux_android_set_sehandle(sehandle);
+    if (!android::vold::GetSehandle()) exit(1);
 
     mkdir("/dev/block/vold", 0755);
 

@@ -19,6 +19,16 @@
 
 #include <selinux/android.h>
 
-extern struct selabel_handle* sehandle;
+namespace android {
+namespace vold {
+
+/* Returns the file_contexts handle, opening it on first use. vold's main()
+ * calls this at startup; executables that link libvold without it, such as
+ * recovery, get the handle on their first PrepareDir(). Returns null when
+ * file_contexts could not be opened. */
+struct selabel_handle* GetSehandle();
+
+}  // namespace vold
+}  // namespace android
 
 #endif

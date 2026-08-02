@@ -24,15 +24,11 @@
 using ::android::fuzzService;
 using ::android::sp;
 
-struct selabel_handle* sehandle;
-
 extern "C" int LLVMFuzzerInitialize(int argc, char argv) {
-    sehandle = selinux_android_file_context_handle();
-    if (!sehandle) {
+    if (!android::vold::GetSehandle()) {
         LOG(ERROR) << "Failed to get SELinux file contexts handle in voldFuzzer!";
         exit(1);
     }
-    selinux_android_set_sehandle(sehandle);
     return 0;
 }
 

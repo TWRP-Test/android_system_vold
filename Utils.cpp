@@ -89,11 +89,23 @@ static const char* kAppObbDir = "/Android/obb/";
 
 static const char* kMediaProviderCtx = "u:r:mediaprovider:";
 static const char* kMediaProviderAppCtx = "u:r:mediaprovider_app:";
-struct selabel_handle* sehandle;
 
 // Lock used to protect process-level SELinux changes from racing with each
 // other between multiple threads.
 static std::mutex kSecurityLock;
+
+struct selabel_handle* GetSehandle() {
+    static struct selabel_handle* sehandle = [] {
+        auto* handle = selinux_android_file_context_handle();
+        if (!handle) {
+            LOG(ERROR) << "Failed to get SELinux file contexts handle";
+        } else {
+            selinux_android_set_sehandle(handle);
+        }
+        return handle;
+    }();
+    return sehandle;
+}
 
 std::string GetFuseMountPathForUser(userid_t user_id, const std::string& relative_upper_path) {
     return StringPrintf("/mnt/user/%d/%s", user_id, relative_upper_path.c_str());
@@ -106,7 +118,10 @@ status_t CreateDeviceNode(const std::string& path, dev_t dev) {
     auto secontext = std::unique_ptr<char, void (*)(char*)>(nullptr, freecon);
     char* tmp_secontext;
 
-    if (selabel_lookup(sehandle, &tmp_secontext, cpath, S_IFBLK) == 0) {
+    auto* handle = GetSehandle();
+    if (!handle) {
+        LOG(WARNING) << "No file_contexts, " << path << " will inherit its parent's label";
+    } else if (selabel_lookup(handle, &tmp_secontext, cpath, S_IFBLK) == 0) {
         secontext.reset(tmp_secontext);
         if (setfscreatecon(secontext.get()) != 0) {
             LOG(ERROR) << "Failed to setfscreatecon for device node " << path;
@@ -456,20 +471,22 @@ status_t PrepareDir(const std::string& path, mode_t mode, uid_t uid, gid_t gid,
     auto clearfscreatecon = android::base::make_scope_guard([] { setfscreatecon(nullptr); });
     auto secontext = std::unique_ptr<char, void (*)(char*)>(nullptr, freecon);
     char* tmp_secontext;
-//    if (selabel_lookup(sehandle, &tmp_secontext, cpath, S_IFDIR) == 0) {
-//    LOG(INFO) << "PrepareDir selabel_lookup";
-//        secontext.reset(tmp_secontext);
-//    LOG(INFO) << "PrepareDir secontext reset";
-//        if (setfscreatecon(secontext.get()) != 0) {
-//            LOG(ERROR) << "Failed to setfscreatecon for directory " << path;
-//            return -EINVAL;
-//        }
-//    } else if (errno == ENOENT) {
-//        LOG(INFO) << "No selabel defined for directory " << path;
-//    } else {
-//        LOG(ERROR) << "Failed to look up selabel for directory " << path;
-//        return -errno;
-//    }
+
+    auto* handle = GetSehandle();
+    if (!handle) {
+        LOG(WARNING) << "No file_contexts, " << path << " will inherit its parent's label";
+    } else if (selabel_lookup(handle, &tmp_secontext, cpath, S_IFDIR) == 0) {
+        secontext.reset(tmp_secontext);
+        if (setfscreatecon(secontext.get()) != 0) {
+            LOG(ERROR) << "Failed to setfscreatecon for directory " << path;
+            return -EINVAL;
+        }
+    } else if (errno == ENOENT) {
+        LOG(DEBUG) << "No selabel defined for directory " << path;
+    } else {
+        PLOG(ERROR) << "Failed to look up selabel for directory " << path;
+        return -errno;
+    }
 
     if (fs_prepare_dir(cpath, mode, uid, gid) != 0) return -errno;
     if (attrs && SetAttrs(path, attrs) != 0) return -errno;
