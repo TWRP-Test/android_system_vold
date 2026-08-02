@@ -16,6 +16,8 @@
 
 #include "Keystore.h"
 
+#include <unistd.h>
+
 #include <android-base/logging.h>
 
 #include <aidl/android/hardware/security/keymint/SecurityLevel.h>
@@ -103,8 +105,22 @@ bool KeystoreOperation::finish(std::string* output) {
     return true;
 }
 
+// AServiceManager_waitForService() waits forever, which hangs the decrypt UI
+// when a service cannot come up at all. Poll so the caller can report failure,
+// but leave enough room for a device that starts keystore2 or the KeyMint HAL
+// from a script partway through decryption.
+static ::ndk::SpAIBinder waitForService(const char* name) {
+    for (int i = 0; i < 300; i++) {
+        ::ndk::SpAIBinder binder(AServiceManager_checkService(name));
+        if (binder.get() != nullptr) return binder;
+        usleep(100000);
+    }
+    LOG(ERROR) << "Timed out waiting for " << name;
+    return ::ndk::SpAIBinder();
+}
+
 Keystore::Keystore() {
-    ::ndk::SpAIBinder binder(AServiceManager_waitForService(keystore2_service_name));
+    ::ndk::SpAIBinder binder(waitForService(keystore2_service_name));
     auto keystore2Service = ks2::IKeystoreService::fromBinder(binder);
 
     if (!keystore2Service) {
@@ -224,7 +240,7 @@ KeystoreOperation Keystore::begin(const std::string& key, const km::Authorizatio
 }
 
 void Keystore::earlyBootEnded() {
-    ::ndk::SpAIBinder binder(AServiceManager_waitForService(maintenance_service_name));
+    ::ndk::SpAIBinder binder(waitForService(maintenance_service_name));
     auto maint_service = ks2_maint::IKeystoreMaintenance::fromBinder(binder);
 
     if (!maint_service) {
@@ -237,7 +253,7 @@ void Keystore::earlyBootEnded() {
 }
 
 void Keystore::deleteAllKeys() {
-    ::ndk::SpAIBinder binder(AServiceManager_waitForService(maintenance_service_name));
+    ::ndk::SpAIBinder binder(waitForService(maintenance_service_name));
     auto maint_service = ks2_maint::IKeystoreMaintenance::fromBinder(binder);
 
     if (!maint_service) {
