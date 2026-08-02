@@ -1095,8 +1095,6 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename) 
 
 extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password) {
 	printf("Attempting to decrypt user\n");
-    uint8_t *auth_token = NULL;
-    uint32_t auth_token_len = 0;
     int ret = -1;
 
     struct stat st;
@@ -1168,14 +1166,11 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
 		gk_device->verify(user_id, 0 /* challange */,
 						  curPwdHandle,
 						  enteredPwd,
-						  [&ret, &request_reenroll, &auth_token, &auth_token_len]
+						  [&ret, &request_reenroll]
 							(const android::hardware::gatekeeper::V1_0::GatekeeperResponse &rsp) {
 								ret = static_cast<int>(rsp.code); // propagate errors
 								if (rsp.code >= android::hardware::gatekeeper::V1_0::GatekeeperStatusCode::STATUS_OK) {
 									printf("GateKeeper status ok\n");
-									auth_token = new uint8_t[rsp.data.size()];
-									auth_token_len = rsp.data.size();
-									memcpy(auth_token, rsp.data.data(), auth_token_len);
 									request_reenroll = (rsp.code == android::hardware::gatekeeper::V1_0::GatekeeperStatusCode::STATUS_REENROLL);
 									ret = 0; // all success states are reported as 0
 								} else if (rsp.code == android::hardware::gatekeeper::V1_0::GatekeeperStatusCode::ERROR_RETRY_TIMEOUT && rsp.timeout > 0) {
@@ -1186,7 +1181,6 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
 								}
 							}
 						 );
-	delete[] auth_token;
 	if (!hwRet.isOk() || ret != 0) {
 		printf("gatekeeper verification failed\n");
 		return false;
