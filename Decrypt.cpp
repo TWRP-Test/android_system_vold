@@ -503,6 +503,18 @@ namespace keystore {
 		return false;
 	}
 
+	/* AServiceManager_waitForService() waits forever, which hangs the decrypt
+	 * UI when a declared service never registers. */
+	static ::ndk::SpAIBinder waitForService(const char* name) {
+		for (int i = 0; i < 300; i++) {
+			::ndk::SpAIBinder binder(AServiceManager_checkService(name));
+			if (binder.get() != nullptr) return binder;
+			usleep(100000);
+		}
+		printf("timed out waiting for '%s'\n", name);
+		return ::ndk::SpAIBinder();
+	}
+
 	/* keystore2 runs with its database on tmpfs so that nothing done here can
 	 * reach the real one. It still has to see the installed system's keys, so
 	 * seed it from /data before the first keystore2 call. */
@@ -1129,8 +1141,8 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
 	// Devices that only declare the AIDL GateKeeper have no HIDL service.
 	constexpr const char gatekeeperServiceName[] = "android.hardware.gatekeeper.IGatekeeper/default";
 	if (AServiceManager_isDeclared(gatekeeperServiceName)) {
-		::ndk::SpAIBinder gkBinder(AServiceManager_waitForService(gatekeeperServiceName));
-		auto aidl_gk_device = AidlIGatekeeper::fromBinder(gkBinder);
+		auto aidl_gk_device =
+			AidlIGatekeeper::fromBinder(keystore::waitForService(gatekeeperServiceName));
 		if (!aidl_gk_device) {
 			printf("failed to get gatekeeper service\n");
 			return false;
