@@ -551,8 +551,10 @@ bool fscrypt_initialize_systemwide_keys() {
 
     KeyBuffer device_key;
 install:
+    // Never generate the device key here: a new one makes the existing /data
+    // permanently unreadable.
     if (!retrieveOrGenerateKey(device_key_path, device_key_temp, kEmptyAuthentication,
-                               makeGen(s_data_options), &device_key))
+                               android::vold::neverGen(), &device_key))
         return false;
 
     // This initializes s_device_policy, which is a global variable so that
@@ -659,11 +661,17 @@ bool fscrypt_init_user0() {
         if (!prepare_dir(user_key_dir + "/ce", 0700, AID_ROOT, AID_ROOT)) return false;
         if (!prepare_dir(user_key_dir + "/de", 0700, AID_ROOT, AID_ROOT)) return false;
 
-        // Create user 0's DE and CE keys if they don't already exist.  Check
-        // each key independently, since if the first boot was interrupted it is
-        // possible that the DE key exists but the CE key does not.
-        if (!de_key_exists(0) && !create_de_key(0, false)) return false;
-        if (!ce_key_exists(0) && !create_ce_key(0, false)) return false;
+        // AOSP creates user 0's keys here when they are missing. That is right
+        // on a first boot, but in recovery a missing key means we failed to
+        // read it, and creating a new one throws the user's data away.
+        if (!de_key_exists(0)) {
+            LOG(ERROR) << "DE key for user 0 not found, refusing to create one";
+            return false;
+        }
+        if (!ce_key_exists(0)) {
+            LOG(ERROR) << "CE key for user 0 not found, refusing to create one";
+            return false;
+        }
 
         // TODO: switch to loading only DE_0 here once framework makes
         // explicit calls to install DE keys for secondary users
