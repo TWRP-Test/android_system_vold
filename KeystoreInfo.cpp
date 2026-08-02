@@ -53,6 +53,7 @@ std::string KeystoreInfo::getHandle(const userid_t user_id) {
 	rc = sqlite3_open("/data/system/locksettings.db", &db);
 	if (rc) {
 		fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
 		return "";
 	}
 	std::string sql = "SELECT * FROM locksettings WHERE name = 'sp-handle' AND user = " + std::to_string(user_id);
@@ -67,6 +68,8 @@ std::string KeystoreInfo::getHandle(const userid_t user_id) {
 	}
 	if (rc != SQLITE_DONE) {
 		fprintf(stderr, "error: %s\n", sqlite3_errmsg(db));
+		sqlite3_finalize(stmt);
+		sqlite3_close(db);
 		return "";
 	}
 	sqlite3_finalize(stmt);
