@@ -532,7 +532,7 @@ namespace keystore {
 		// keystore2 holds the destination open, so stop it for a clean copy.
 		printf("stopping keystore2 to sync '%s'\n", src.c_str());
 		property_set("ctl.stop", "keystore2");
-		waitForServiceState("keystore2", "stopped");
+		if (!waitForServiceState("keystore2", "stopped")) return false;
 
 		unlink("/tmp/misc/keystore/persistent.sqlite-wal");
 		unlink("/tmp/misc/keystore/persistent.sqlite-shm");
