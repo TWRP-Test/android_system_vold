@@ -296,18 +296,17 @@ bool Get_Spblob_Data(const std::string& spblob_path, const std::string& handle_s
 		} else
 			found_file = true;
 	} else {
+		// The Keystore alias uses the handle as-is, but the spblob files are
+		// named after it zero-padded to 16 digits.
 		printf("trying to read %s_file data with leading 0\n", tag.c_str());
-		std::vector<std::string> file_paths = {
-			spblob_path + "0" + handle_str + suffix,
-			spblob_path + "00" + handle_str + suffix
-		};
-		for (auto& file : file_paths) {
-			if (!android::base::ReadFileToString(file, data)) {
-				printf("Failed to read '%s'\n", file.c_str());
-			} else {
-				found_file = true;
-				break;
-			}
+		std::string padded = handle_str.size() < 16
+					 ? std::string(16 - handle_str.size(), '0') + handle_str
+					 : handle_str;
+		file = spblob_path + padded + suffix;
+		if (!android::base::ReadFileToString(file, data)) {
+			printf("Failed to read '%s'\n", file.c_str());
+		} else {
+			found_file = true;
 		}
 	}
 	return found_file;
