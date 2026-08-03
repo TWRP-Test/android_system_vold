@@ -442,26 +442,6 @@ bool Get_Weaver_Data(const std::string& spblob_path, const std::string& handle_s
 
 namespace android {
 
-/* These next 2 functions try to get the keystore service 50 times because
- * the keystore is not always ready when TWRP boots */
-android::sp<IBinder> getKeystoreBinder() {
-	android::sp<IServiceManager> sm = android::defaultServiceManager();
-    return sm->waitForService(String16("android.security.keystore"));
-}
-
-android::sp<IBinder> getKeystoreBinderRetry() {
-	printf("Starting keystore...\n");
-    property_set("ctl.start", "keystore");
-	int retry_count = 50;
-	android::sp<IBinder> binder = getKeystoreBinder();
-	while (binder == NULL && retry_count) {
-		printf("Waiting for keystore service... %i\n", retry_count--);
-		sleep(1);
-		binder = getKeystoreBinder();
-	}
-	return binder;
-}
-
 namespace keystore {
 
 #define SYNTHETIC_PASSWORD_VERSION_V1 1
