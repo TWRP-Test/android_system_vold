@@ -444,6 +444,8 @@ namespace android {
 
 namespace keystore {
 
+static std::map<userid_t, std::string> s_ce_secrets;
+
 #define SYNTHETIC_PASSWORD_VERSION_V1 1
 #define SYNTHETIC_PASSWORD_VERSION_V2 2
 #define SYNTHETIC_PASSWORD_VERSION_V3 3
@@ -757,11 +759,26 @@ bool Decrypt_CE_storage(const userid_t user_id, const std::string& secret) {
 	}
 	printf("Attempting to prepare user storage\n");
 	if (!fscrypt_prepare_user_storage("", user_id, flags)) {
-		printf("failed to fscrypt_prepare_user_storage\n");
-		return false;
+		// On a TWRP remount these directories already exist and the vendor
+		// vold_prepare_subdirs helper is not idempotent. The CE key was
+		// successfully installed by fscrypt_unlock_ce_storage() above, which
+		// is the part required to make encrypted filenames accessible again.
+		printf("fscrypt_prepare_user_storage failed after CE key install; continuing\n");
 	}
 	printf("User %i Decrypted Successfully!\n", user_id);
+	keystore::s_ce_secrets[user_id] = secret;
 	return true;
+}
+
+bool keystore::Reinstall_User_Key(const userid_t user_id) {
+	auto secret = s_ce_secrets.find(user_id);
+	if (secret == s_ce_secrets.end()) {
+		printf("No cached CE secret for user %i\n", user_id);
+		return false;
+	}
+	// Force a reinstall in case vold still thinks CE is unlocked from before a /data remount.
+	fscrypt_lock_ce_storage(user_id);
+	return Decrypt_CE_storage(user_id, secret->second);
 }
 
 // /* Decrypt_User_Synth_Pass is the TWRP C++ equivalent to spBasedDoVerifyCredential
