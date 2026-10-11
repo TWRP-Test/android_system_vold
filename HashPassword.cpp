@@ -21,59 +21,98 @@
  * user's password is appended to the end of the 128 bytes. This string
  * is then hashed with sha512 and the sha512 value is then converted to
  * hex with upper-case characters.
+ *
+ * PersonalizedHashSP800 implements the NIST SP 800-108 KDF in counter
+ * mode with HMAC-SHA256, matching the Java implementation in Android's
+ * SyntheticPasswordCrypto.
  */
 
-#include <stdio.h>
-#include <string>
+#include <stdint.h>
 #include <stdlib.h>
-#include <openssl/sha.h>
+#include <string.h>
+
+#include <memory>
+#include <string>
+
+#include <openssl/digest.h>
 #include <openssl/hmac.h>
+#include <openssl/sha.h>
 
 #include "HashPassword.h"
 
 #define PASS_PADDING_SIZE 128
-#define SHA512_HEX_SIZE SHA512_DIGEST_LENGTH * 2
-#define SHA256_HEX_SIZE SHA256_DIGEST_LENGTH * 2
+
+// SHA-512(prefix padded to 128 bytes || key), without an assembled heap buffer.
+static bool PersonalizedHashDigest(const char* prefix, const char* key,
+                                   const size_t key_size,
+                                   uint8_t hash[SHA512_DIGEST_LENGTH]) {
+	std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> ctx(
+			EVP_MD_CTX_new(), EVP_MD_CTX_free);
+	if (!ctx) return false;
+	if (EVP_DigestInit_ex(ctx.get(), EVP_sha512(), nullptr) != 1)
+		return false;
+
+	const size_t prefix_size = strlen(prefix);
+	if (prefix_size > 0 &&
+			EVP_DigestUpdate(ctx.get(), prefix, prefix_size) != 1) {
+		return false;
+	}
+	static const uint8_t padding[PASS_PADDING_SIZE] = {};
+	if (prefix_size < PASS_PADDING_SIZE &&
+			EVP_DigestUpdate(ctx.get(), padding,
+					PASS_PADDING_SIZE - prefix_size) != 1) {
+		return false;
+	}
+	if (key_size > 0 && EVP_DigestUpdate(ctx.get(), key, key_size) != 1)
+		return false;
+
+	unsigned int hash_size = 0;
+	if (EVP_DigestFinal_ex(ctx.get(), hash, &hash_size) != 1 ||
+			hash_size != SHA512_DIGEST_LENGTH) {
+		return false;
+	}
+	return true;
+}
+
+static void AppendUint32Be(std::string* out, const uint32_t value) {
+	const uint8_t bytes[4] = {
+			static_cast<uint8_t>(value >> 24),
+			static_cast<uint8_t>(value >> 16),
+			static_cast<uint8_t>(value >> 8),
+			static_cast<uint8_t>(value),
+	};
+	out->append(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+}
+
+static std::string BytesToHexString(const uint8_t* bytes, const size_t size,
+                                    const bool uppercase) {
+	static const char digits_lower[] = "0123456789abcdef";
+	static const char digits_upper[] = "0123456789ABCDEF";
+	const char* digits = uppercase ? digits_upper : digits_lower;
+	std::string hex;
+	hex.reserve(size * 2);
+	for (size_t i = 0; i < size; i++) {
+		hex.push_back(digits[bytes[i] >> 4]);
+		hex.push_back(digits[bytes[i] & 0xF]);
+	}
+	return hex;
+}
 
 void* PersonalizedHashBinary(const char* prefix, const char* key, const size_t key_size) {
-	size_t size = PASS_PADDING_SIZE + key_size;
-	unsigned char* buffer = (unsigned char*)calloc(1, size);
-	if (!buffer) return NULL; // failed to malloc
-	memcpy((void*)buffer, (void*)prefix, strlen(prefix));
-	unsigned char* ptr = buffer + PASS_PADDING_SIZE;
-	memcpy((void*)ptr, key, key_size);
-	unsigned char hash[SHA512_DIGEST_LENGTH];
-	SHA512_CTX sha512;
-	SHA512_Init(&sha512);
-	SHA512_Update(&sha512, buffer, size);
-	SHA512_Final(hash, &sha512);
-	free(buffer);
+	uint8_t hash[SHA512_DIGEST_LENGTH];
+	if (!PersonalizedHashDigest(prefix, key, key_size, hash))
+		return NULL;
 	void* ret = malloc(SHA512_DIGEST_LENGTH);
-	if (!ret) return NULL; // failed to malloc
-	memcpy(ret, (void*)&hash[0], SHA512_DIGEST_LENGTH);
+	if (!ret) return NULL;
+	memcpy(ret, hash, SHA512_DIGEST_LENGTH);
 	return ret;
 }
 
 std::string PersonalizedHash(const char* prefix, const char* key, const size_t key_size) {
-	size_t size = PASS_PADDING_SIZE + key_size;
-	unsigned char* buffer = (unsigned char*)calloc(1, size);
-	if (!buffer) return ""; // failed to malloc
-	memcpy((void*)buffer, (void*)prefix, strlen(prefix));
-	unsigned char* ptr = buffer + PASS_PADDING_SIZE;
-	memcpy((void*)ptr, key, key_size);
-	unsigned char hash[SHA512_DIGEST_LENGTH];
-	SHA512_CTX sha512;
-	SHA512_Init(&sha512);
-	SHA512_Update(&sha512, buffer, size);
-	SHA512_Final(hash, &sha512);
-	int index = 0;
-	char hex_hash[SHA512_HEX_SIZE + 1];
-	for(index = 0; index < SHA512_DIGEST_LENGTH; index++)
-		sprintf(hex_hash + (index * 2), "%02X", hash[index]);
-	hex_hash[128] = 0;
-	std::string ret = hex_hash;
-	free(buffer);
-	return ret;
+	uint8_t hash[SHA512_DIGEST_LENGTH];
+	if (!PersonalizedHashDigest(prefix, key, key_size, hash))
+		return "";
+	return BytesToHexString(hash, sizeof(hash), true);
 }
 
 std::string PersonalizedHash(const char* prefix, const std::string& Password) {
@@ -81,34 +120,26 @@ std::string PersonalizedHash(const char* prefix, const std::string& Password) {
 }
 
 std::string PersonalizedHashSP800(const char* label, const char* context, const char* key, const size_t key_size) {
-	HMAC_CTX ctx;
-	HMAC_CTX_init(&ctx);
-	HMAC_Init_ex(&ctx, key, key_size, EVP_sha256(), NULL);
-	unsigned int counter = 1;
-	endianswap(&counter);
-	HMAC_Update(&ctx, (const unsigned char*)&counter, 4);
-	HMAC_Update(&ctx, (const unsigned char*)label, strlen(label));
-	const unsigned char divider = 0;
-	HMAC_Update(&ctx, &divider, 1);
-	HMAC_Update(&ctx, (const unsigned char*)context, strlen(context));
-	unsigned int contextDisambiguation = strlen(context) * 8;
-	endianswap(&contextDisambiguation);
-	HMAC_Update(&ctx, (const unsigned char*)&contextDisambiguation, 4);
-	unsigned int finalValue = 256;
-	endianswap(&finalValue);
-	HMAC_Update(&ctx, (const unsigned char*)&finalValue, 4);
+	// Assembles the SP 800-108 counter mode input:
+	// counter || label || 0 || context || bit length of context || 256
+	std::string input;
+	input.reserve(4 + strlen(label) + 1 + strlen(context) + 8);
+	AppendUint32Be(&input, 1);
+	input.append(label);
+	input.push_back('\0'); // divider between the label and the context
+	input.append(context);
+	AppendUint32Be(&input, strlen(context) * 8);
+	AppendUint32Be(&input, 256);
 
-	unsigned char output[SHA256_DIGEST_LENGTH];
-	unsigned int out_size = 0;
-	HMAC_Final(&ctx, output, &out_size);
-
-	int index = 0;
-	char hex_hash[SHA256_HEX_SIZE + 1];
-	for(index = 0; index < SHA256_DIGEST_LENGTH; index++)
-		sprintf(hex_hash + (index * 2), "%02x", output[index]);
-	hex_hash[SHA256_HEX_SIZE] = 0;
-	std::string ret = hex_hash;
-	return ret;
+	uint8_t hash[SHA256_DIGEST_LENGTH];
+	unsigned int hash_size = 0;
+	if (!HMAC(EVP_sha256(), key, key_size,
+			reinterpret_cast<const uint8_t*>(input.data()), input.size(),
+			hash, &hash_size) ||
+			hash_size != SHA256_DIGEST_LENGTH) {
+		return "";
+	}
+	return BytesToHexString(hash, sizeof(hash), false);
 }
 
 std::string HashPassword(const std::string& Password) {
