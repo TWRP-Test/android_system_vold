@@ -34,6 +34,7 @@
 #include <aidl/android/hardware/weaver/IWeaver.h>
 
 #include <iostream>
+#include <unistd.h>
 #define ERROR 1
 #define LOG(x) std::cout
 
@@ -51,11 +52,24 @@ namespace android {
 namespace vold {
 
 Weaver::Weaver() {
-    const std::string instance = std::string(::aidl::android::hardware::weaver::IWeaver::descriptor) + "/default";
-    AIBinder* binder = AServiceManager_waitForService(instance.c_str());
-    mAidlDevice = ::aidl::android::hardware::weaver::IWeaver::fromBinder(ndk::SpAIBinder(binder));
+	const std::string instance = std::string(::aidl::android::hardware::weaver::IWeaver::descriptor) + "/default";
+	if (AServiceManager_isDeclared(instance.c_str())) {
+		// Wait up to 30 seconds for AIDL, then try the existing HIDL fallback.
+		for (int i = 0; i < 300; i++) {
+			ndk::SpAIBinder binder(AServiceManager_checkService(instance.c_str()));
+			if (binder.get() != nullptr) {
+				mAidlDevice = ::aidl::android::hardware::weaver::IWeaver::fromBinder(binder);
+				break;
+			}
+			usleep(100000);
+		}
+	}
 	if (mAidlDevice == nullptr) {
-		mDevice = ::android::hardware::weaver::V1_0::IWeaver::getService();
+		for (int i = 0; i < 300; i++) {
+			mDevice = ::android::hardware::weaver::V1_0::IWeaver::tryGetService();
+			if (mDevice != nullptr) break;
+			usleep(100000);
+		}
 	}
 	GottenConfig = false;
 }
@@ -63,6 +77,9 @@ Weaver::Weaver() {
 bool Weaver::GetConfig() {
 	if (GottenConfig)
 		return true;
+
+	if (mAidlDevice == nullptr && mDevice == nullptr)
+		return false;
 
 	if (mAidlDevice != nullptr) {
 		auto r = mAidlDevice->getConfig(&aidlConfig);

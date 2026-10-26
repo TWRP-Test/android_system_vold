@@ -888,11 +888,16 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
 			android::sp<android::hardware::gatekeeper::V1_0::IGatekeeper> gk_device;
 			constexpr const char gatekeeperServiceName[] = "android.hardware.gatekeeper.IGatekeeper/default";
 			if (AServiceManager_isDeclared(gatekeeperServiceName)) {
-				::ndk::SpAIBinder ks2Binder(AServiceManager_waitForService(gatekeeperServiceName));
-				aidl_gk_device = AidlIGatekeeper::fromBinder(ks2Binder);
+				::ndk::SpAIBinder ks2Binder(android::keystore::waitForService(gatekeeperServiceName));
+				if (ks2Binder.get() != nullptr) aidl_gk_device = AidlIGatekeeper::fromBinder(ks2Binder);
 			}
 			if (!aidl_gk_device) {
-				gk_device = ::android::hardware::gatekeeper::V1_0::IGatekeeper::getService();
+				// getService() can wait forever if the HAL fails to start.
+				for (int i = 0; i < 300; i++) {
+					gk_device = ::android::hardware::gatekeeper::V1_0::IGatekeeper::tryGetService();
+					if (gk_device != nullptr) break;
+					usleep(100000);
+				}
 			}
 
 			if (!aidl_gk_device && !gk_device) {
@@ -988,14 +993,14 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
 					authToken.authenticatorType = static_cast<HardwareAuthenticatorType>(
 							betoh32(hwAuthToken->authenticator_type));
 					authToken.mac.assign(&hwAuthToken->hmac[0], &hwAuthToken->hmac[32]);
-					AIBinder* authzAIBinder = AServiceManager_waitForService("android.security.authorization");
-					::ndk::SpAIBinder binder(authzAIBinder);
+					::ndk::SpAIBinder binder(android::keystore::waitForService("android.security.authorization"));
 					auto service = aidl::android::security::authorization::IKeystoreAuthorization::fromBinder(binder);
-					if (service == NULL) {
+					if (service == nullptr) {
 						printf("error: could not connect to keystore service\n");
 						ALOGE("error: could not connect to keystore service\n");
+					} else {
+						auto binder_result = service->addAuthToken(authToken);
 					}
-					auto binder_result = service->addAuthToken(authToken);
 				}
 			}
 
@@ -1119,8 +1124,8 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
 	// Devices that only declare the AIDL GateKeeper have no HIDL service.
 	constexpr const char gatekeeperServiceName[] = "android.hardware.gatekeeper.IGatekeeper/default";
 	if (AServiceManager_isDeclared(gatekeeperServiceName)) {
-		auto aidl_gk_device =
-			AidlIGatekeeper::fromBinder(keystore::waitForService(gatekeeperServiceName));
+		::ndk::SpAIBinder binder(keystore::waitForService(gatekeeperServiceName));
+		auto aidl_gk_device = binder.get() == nullptr ? nullptr : AidlIGatekeeper::fromBinder(binder);
 		if (!aidl_gk_device) {
 			printf("failed to get gatekeeper service\n");
 			return false;
@@ -1137,7 +1142,11 @@ extern "C" bool Decrypt_User(const userid_t user_id, const std::string& Password
 	}
 
 	android::sp<android::hardware::gatekeeper::V1_0::IGatekeeper> gk_device;
-	gk_device = ::android::hardware::gatekeeper::V1_0::IGatekeeper::getService();
+	for (int i = 0; i < 300; i++) {
+		gk_device = ::android::hardware::gatekeeper::V1_0::IGatekeeper::tryGetService();
+		if (gk_device != nullptr) break;
+		usleep(100000);
+	}
 	if (gk_device == nullptr)
 		return false;
 
